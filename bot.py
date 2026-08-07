@@ -57,6 +57,22 @@ def handler(message):
 
     db[str(sent.message_id)] = message.chat.id
     save(db)
+@bot.message_handler(commands=["users"])
+def users_count(message):
+    if message.from_user.id != ADMIN_ID:
+        return
 
+    db = load()
+
+    ids = []
+
+    for i in db.values():
+        if i not in ids:
+            ids.append(i)
+
+    bot.send_message(
+        ADMIN_ID,
+        f"👥 عدد المستخدمين: {len(ids)}"
+    )
 print("Bot Started")
 bot.infinity_polling(skip_pending=True)
