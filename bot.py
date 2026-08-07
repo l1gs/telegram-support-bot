@@ -30,7 +30,7 @@ def load_users():
     try:
         with open(DB, "r") as f:
             return json.load(f)
-    except:
+    except Exception:
         return {}
 
 
@@ -47,7 +47,7 @@ def load_banned():
     try:
         with open(BAN, "r") as f:
             return json.load(f)
-    except:
+    except Exception:
         return []
 
 
@@ -155,24 +155,25 @@ def receive_user_message(message):
                 reply_to_message_id=header.message_id
             )
 
-            # يمكن الرد على المعلومات أو على الملف نفسه
             db[str(header.message_id)] = user_id
             db[str(sent.message_id)] = user_id
 
         save_users(db)
 
     except Exception as error:
+
         print(f"Error receiving message: {error}")
 
 
 # =========================
-# رد الإدارة
+# رد الإدارة على المستخدم
 # =========================
 
 @bot.message_handler(
     func=lambda message: (
         message.from_user.id == ADMIN_ID
         and message.reply_to_message is not None
+        and not (message.text or "").startswith("/")
     ),
     content_types=[
         "text",
@@ -371,7 +372,7 @@ def broadcast_command(message):
 
         bot.reply_to(
             message,
-            "استخدم الأمر بالرد على رسالة:\n"
+            "⚠️ استخدم الأمر بالرد على الرسالة التي تريد إرسالها:\n\n"
             "/broadcast"
         )
 
@@ -381,14 +382,16 @@ def broadcast_command(message):
 
     user_ids = set(db.values())
 
+    banned = set(load_banned())
+
     success = 0
     failed = 0
-
-    banned = set(load_banned())
+    skipped = 0
 
     for user_id in user_ids:
 
         if user_id in banned:
+            skipped += 1
             continue
 
         try:
@@ -401,7 +404,11 @@ def broadcast_command(message):
 
             success += 1
 
-        except Exception:
+        except Exception as error:
+
+            print(
+                f"Broadcast error for {user_id}: {error}"
+            )
 
             failed += 1
 
@@ -409,7 +416,8 @@ def broadcast_command(message):
         ADMIN_ID,
         f"📢 اكتملت الإذاعة.\n\n"
         f"✅ تم الإرسال: {success}\n"
-        f"❌ فشل الإرسال: {failed}"
+        f"❌ فشل الإرسال: {failed}\n"
+        f"🚫 المحظورون: {skipped}"
     )
 
 
