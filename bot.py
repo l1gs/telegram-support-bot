@@ -10,7 +10,7 @@ BAN = "banned.json"
 
 
 # =========================
-# ملفات البيانات
+# إنشاء ملفات البيانات
 # =========================
 
 if not os.path.exists(DB):
@@ -22,9 +22,16 @@ if not os.path.exists(BAN):
         json.dump([], f)
 
 
+# =========================
+# المستخدمين
+# =========================
+
 def load_users():
-    with open(DB, "r") as f:
-        return json.load(f)
+    try:
+        with open(DB, "r") as f:
+            return json.load(f)
+    except:
+        return {}
 
 
 def save_users(data):
@@ -32,9 +39,389 @@ def save_users(data):
         json.dump(data, f)
 
 
+# =========================
+# المحظورين
+# =========================
+
 def load_banned():
-    with open(BAN, "r") as f:
-        return json.load(f)
+    try:
+        with open(BAN, "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+
+def save_banned(data):
+    with open(BAN, "w") as f:
+        json.dump(data, f)
+
+
+def is_banned(user_id):
+    return user_id in load_banned()
+
+
+# =========================
+# اسم المستخدم
+# =========================
+
+def get_user_name(message):
+    name = message.from_user.first_name or ""
+    username = message.from_user.username
+
+    if username:
+        return f"{name} (@{username})"
+
+    return name
+
+
+# =========================
+# START
+# =========================
+
+@bot.message_handler(commands=["start"])
+def start(message):
+
+    if is_banned(message.from_user.id):
+        return
+
+    bot.reply_to(
+        message,
+        "👋 أهلاً بك\n\n"
+        "أرسل رسالتك وسيتم إيصالها إلى الإدارة."
+    )
+
+
+# =========================
+# استقبال رسائل المستخدمين
+# =========================
+
+@bot.message_handler(
+    func=lambda message: message.from_user.id != ADMIN_ID,
+    content_types=[
+        "text",
+        "photo",
+        "video",
+        "document",
+        "audio",
+        "voice",
+        "sticker",
+        "animation",
+        "contact",
+        "location"
+    ]
+)
+def receive_user_message(message):
+
+    user_id = message.from_user.id
+
+    if is_banned(user_id):
+        return
+
+    db = load_users()
+
+    try:
+
+        # =========================
+        # رسالة نصية
+        # =========================
+
+        if message.content_type == "text":
+
+            sent = bot.send_message(
+                ADMIN_ID,
+                f"👤 {get_user_name(message)}\n"
+                f"🆔 ID: {user_id}\n\n"
+                f"{message.text}"
+            )
+
+            db[str(sent.message_id)] = user_id
+
+        # =========================
+        # رسالة غير نصية
+        # =========================
+
+        else:
+
+            header = bot.send_message(
+                ADMIN_ID,
+                f"👤 {get_user_name(message)}\n"
+                f"🆔 ID: {user_id}"
+            )
+
+            sent = bot.copy_message(
+                chat_id=ADMIN_ID,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id,
+                reply_to_message_id=header.message_id
+            )
+
+            # يمكن الرد على المعلومات أو على الملف نفسه
+            db[str(header.message_id)] = user_id
+            db[str(sent.message_id)] = user_id
+
+        save_users(db)
+
+    except Exception as error:
+        print(f"Error receiving message: {error}")
+
+
+# =========================
+# رد الإدارة
+# =========================
+
+@bot.message_handler(
+    func=lambda message: (
+        message.from_user.id == ADMIN_ID
+        and message.reply_to_message is not None
+    ),
+    content_types=[
+        "text",
+        "photo",
+        "video",
+        "document",
+        "audio",
+        "voice",
+        "sticker",
+        "animation",
+        "contact",
+        "location"
+    ]
+)
+def admin_reply(message):
+
+    db = load_users()
+
+    replied_id = str(
+        message.reply_to_message.message_id
+    )
+
+    if replied_id not in db:
+
+        bot.send_message(
+            ADMIN_ID,
+            "⚠️ لم أجد المستخدم المرتبط بهذه الرسالة."
+        )
+
+        return
+
+    user_id = int(db[replied_id])
+
+    if is_banned(user_id):
+
+        bot.send_message(
+            ADMIN_ID,
+            "🚫 هذا المستخدم محظور."
+        )
+
+        return
+
+    try:
+
+        bot.copy_message(
+            chat_id=user_id,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id
+        )
+
+        bot.send_message(
+            ADMIN_ID,
+            "✅ تم إرسال الرد للمستخدم."
+        )
+
+    except Exception as error:
+
+        bot.send_message(
+            ADMIN_ID,
+            f"❌ فشل إرسال الرسالة:\n{error}"
+        )
+
+
+# =========================
+# عدد المستخدمين
+# =========================
+
+@bot.message_handler(commands=["users"])
+def users_command(message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    db = load_users()
+
+    user_ids = set(db.values())
+
+    bot.send_message(
+        ADMIN_ID,
+        f"👥 عدد المستخدمين: {len(user_ids)}"
+    )
+
+
+# =========================
+# حظر مستخدم
+# =========================
+
+@bot.message_handler(commands=["ban"])
+def ban_command(message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split()
+
+    if len(parts) != 2:
+
+        bot.reply_to(
+            message,
+            "الاستخدام:\n/ban USER_ID"
+        )
+
+        return
+
+    try:
+
+        user_id = int(parts[1])
+
+    except ValueError:
+
+        bot.reply_to(
+            message,
+            "❌ ID غير صحيح."
+        )
+
+        return
+
+    banned = load_banned()
+
+    if user_id not in banned:
+
+        banned.append(user_id)
+        save_banned(banned)
+
+    bot.reply_to(
+        message,
+        f"🚫 تم حظر المستخدم:\n{user_id}"
+    )
+
+
+# =========================
+# إلغاء الحظر
+# =========================
+
+@bot.message_handler(commands=["unban"])
+def unban_command(message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    parts = message.text.split()
+
+    if len(parts) != 2:
+
+        bot.reply_to(
+            message,
+            "الاستخدام:\n/unban USER_ID"
+        )
+
+        return
+
+    try:
+
+        user_id = int(parts[1])
+
+    except ValueError:
+
+        bot.reply_to(
+            message,
+            "❌ ID غير صحيح."
+        )
+
+        return
+
+    banned = load_banned()
+
+    if user_id in banned:
+
+        banned.remove(user_id)
+        save_banned(banned)
+
+        bot.reply_to(
+            message,
+            f"✅ تم إلغاء حظر المستخدم:\n{user_id}"
+        )
+
+    else:
+
+        bot.reply_to(
+            message,
+            "هذا المستخدم غير محظور."
+        )
+
+
+# =========================
+# إذاعة لجميع المستخدمين
+# =========================
+
+@bot.message_handler(commands=["broadcast"])
+def broadcast_command(message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    if not message.reply_to_message:
+
+        bot.reply_to(
+            message,
+            "استخدم الأمر بالرد على رسالة:\n"
+            "/broadcast"
+        )
+
+        return
+
+    db = load_users()
+
+    user_ids = set(db.values())
+
+    success = 0
+    failed = 0
+
+    banned = set(load_banned())
+
+    for user_id in user_ids:
+
+        if user_id in banned:
+            continue
+
+        try:
+
+            bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=message.chat.id,
+                message_id=message.reply_to_message.message_id
+            )
+
+            success += 1
+
+        except Exception:
+
+            failed += 1
+
+    bot.send_message(
+        ADMIN_ID,
+        f"📢 اكتملت الإذاعة.\n\n"
+        f"✅ تم الإرسال: {success}\n"
+        f"❌ فشل الإرسال: {failed}"
+    )
+
+
+# =========================
+# تشغيل البوت
+# =========================
+
+print("Bot Started")
+
+bot.infinity_polling(
+    skip_pending=True
+)        return json.load(f)
 
 
 def save_banned(data):
