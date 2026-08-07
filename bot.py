@@ -1,10 +1,24 @@
 import telebot
 from telebot.types import Message
 from config import TOKEN, ADMIN_ID
+import json
+import os
 
 bot = telebot.TeleBot(TOKEN)
 
-reply_map = {}
+DB = "users.json"
+
+if not os.path.exists(DB):
+    with open(DB, "w") as f:
+        json.dump({}, f)
+
+def load():
+    with open(DB, "r") as f:
+        return json.load(f)
+
+def save(data):
+    with open(DB, "w") as f:
+        json.dump(data, f)
 
 @bot.message_handler(commands=["start"])
 def start(message):
@@ -15,6 +29,8 @@ def start(message):
 ])
 def handler(message):
 
+    db = load()
+
     if message.from_user.id == ADMIN_ID:
 
         if not message.reply_to_message:
@@ -22,13 +38,11 @@ def handler(message):
 
         key = str(message.reply_to_message.message_id)
 
-        if key not in reply_map:
+        if key not in db:
             return
 
-        user_id = reply_map[key]
-
         bot.copy_message(
-            chat_id=user_id,
+            chat_id=db[key],
             from_chat_id=message.chat.id,
             message_id=message.message_id
         )
@@ -41,8 +55,8 @@ def handler(message):
         message_id=message.message_id
     )
 
-    reply_map[str(sent.message_id)] = message.chat.id
+    db[str(sent.message_id)] = message.chat.id
+    save(db)
 
 print("Bot Started")
 bot.infinity_polling(skip_pending=True)
-bot.infinity_polling()
